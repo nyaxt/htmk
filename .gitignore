@@ -1,0 +1,4 @@
+fluent/*.log
+fluent/al
+fluent/gems
+fluent/.bundle
