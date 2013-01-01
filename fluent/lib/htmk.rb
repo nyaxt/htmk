@@ -31,7 +31,10 @@ end
 class StringColumns < Columns
   
   def format(v)
-    "#{v}\n"
+    s = v.to_s
+    z = s.size
+    raise "value str size must be below 64k for now" if z > 65535
+    [z, s].pack('Sa*')
   end
 
 end
