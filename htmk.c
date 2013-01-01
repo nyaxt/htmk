@@ -37,10 +37,27 @@ static int colreader_gets(struct colreader_t* cr);
 struct colreader_t
 {
   int fd;
+
+  size_t blocksz;
+  char* block;
+
+  const char* p;
   
   size_t linesz;
   char* linebuf;
 };
+
+size_t
+get_filesize_from_fd(int fd)
+{
+  struct stat s;
+  if(fstat(fd, &s) < 0)
+  {
+    perror("fstat"); exit(1); 
+  }
+
+  return s.st_size;
+}
 
 struct colreader_t*
 colreader_new(int fd)
@@ -48,6 +65,11 @@ colreader_new(int fd)
   struct colreader_t* cr = calloc(sizeof(struct colreader_t), 1);
 
   cr->fd = fd;
+  cr->blocksz = get_filesize_from_fd(cr->fd);
+  fprintf(stderr, "blocksz: %zd\n", cr->blocksz);
+  cr->block = malloc(cr->blocksz);
+  read(cr->fd, cr->block, cr->blocksz);
+  cr->p = cr->block;
 
   cr->linesz = 0;
   cr->linebuf = malloc(MAX_LINELEN+1);
@@ -59,6 +81,7 @@ void
 colreader_free(struct colreader_t* cr)
 {
 #define FREE_AND_CLEAR(MEMB) free(cr->MEMB); cr->MEMB = NULL;
+  FREE_AND_CLEAR(block);
   FREE_AND_CLEAR(linebuf);
 #undef FREE_AND_CLEAR
 
@@ -68,15 +91,11 @@ colreader_free(struct colreader_t* cr)
 int
 colreader_fetch_linesz(struct colreader_t* cr)
 {
-  uint16_t z;
-  if(read(cr->fd, &z, sizeof(z)) == 0)
-  {
-    fprintf(stderr, "reached eof\n");
-    cr->linesz = 0;
-    return 0;
-  }
+  if(cr->block + cr->blocksz <= cr->p) return 0;
 
-  cr->linesz = z;
+  cr->linesz = *(uint16_t*)(cr->p);
+  cr->p += sizeof(uint16_t);
+
   return 1;
 }
 
@@ -87,7 +106,8 @@ colreader_gets(struct colreader_t* cr)
   if(! colreader_fetch_linesz(cr)) return 0;
 
   // read string
-  read(cr->fd, cr->linebuf, cr->linesz);
+  memcpy(cr->linebuf, cr->p, cr->linesz);
+  cr->p += cr->linesz;
   
   // nullterm
   cr->linebuf[cr->linesz] = '\0';
