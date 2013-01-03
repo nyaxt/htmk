@@ -46,6 +46,9 @@ struct colreader_t
   
   size_t linesz;
   char* linebuf;
+
+  size_t emitsz;
+  char* emitbuf;
 };
 
 size_t
@@ -75,6 +78,9 @@ colreader_new(int fd)
   cr->linesz = 0;
   cr->linebuf = malloc(MAX_LINELEN+1);
 
+  cr->emitsz = 0;
+  cr->emitbuf = malloc(1024*1024);
+
   return cr;
 }
 
@@ -84,6 +90,7 @@ colreader_free(struct colreader_t* cr)
 #define FREE_AND_CLEAR(MEMB) free(cr->MEMB); cr->MEMB = NULL;
   FREE_AND_CLEAR(block);
   FREE_AND_CLEAR(linebuf);
+  FREE_AND_CLEAR(emitbuf);
 #undef FREE_AND_CLEAR
 
   free(cr);
