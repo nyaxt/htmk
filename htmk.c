@@ -79,7 +79,7 @@ colreader_new(int fd)
   cr->linebuf = malloc(MAX_LINELEN+1);
 
   cr->emitsz = 0;
-  cr->emitbuf = malloc(1024*1024);
+  cr->emitbuf = calloc(32*1024, 1);
 
   return cr;
 }
@@ -88,9 +88,9 @@ void
 colreader_free(struct colreader_t* cr)
 {
 #define FREE_AND_CLEAR(MEMB) free(cr->MEMB); cr->MEMB = NULL;
-  FREE_AND_CLEAR(block);
+  // FREE_AND_CLEAR(block);
   FREE_AND_CLEAR(linebuf);
-  FREE_AND_CLEAR(emitbuf);
+  // FREE_AND_CLEAR(emitbuf);
 #undef FREE_AND_CLEAR
 
   free(cr);
@@ -103,6 +103,8 @@ colreader_fetch_linesz(struct colreader_t* cr)
 
   cr->linesz = *(uint16_t*)(cr->p);
   cr->p += sizeof(uint16_t);
+
+  printf("linesz: %zd\n", cr->linesz);
 
   return 1;
 }
@@ -142,9 +144,19 @@ int main()
   struct colreader_t* cr = colreader_new(fd);
 
   //colreader_scan(cr);
-  fprintf(stderr, "blocksz: %zd, block: %p, linesz: %zd, linebuf: %p\n",
-      cr->blocksz, cr->block, cr->linesz, cr->linebuf);
+  fprintf(stderr, "blocksz: %zd, block: %p, linesz: %zd, linebuf: %p\n"
+      "emitbuf: %p\n",
+      cr->blocksz, cr->block, cr->linesz, cr->linebuf,
+      cr->emitbuf);
   asm_scan(cr);
+
+  cr->p = cr->block = cr->emitbuf;
+  cr->blocksz = cr->emitsz;
+  fprintf(stderr, "blocksz: %zd, block: %p, linesz: %zd, linebuf: %p\n"
+      "emitbuf: %p\n",
+      cr->blocksz, cr->block, cr->linesz, cr->linebuf,
+      cr->emitbuf);
+  colreader_scan(cr);
 
   colreader_free(cr);
   close(fd);
