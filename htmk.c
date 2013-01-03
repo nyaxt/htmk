@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <string.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -115,6 +116,8 @@ colreader_gets(struct colreader_t* cr)
   return 1;
 }
 
+extern void asm_scan(struct colreader_t* cr);
+
 void
 colreader_scan(struct colreader_t* cr)
 {
@@ -131,7 +134,10 @@ int main()
 
   struct colreader_t* cr = colreader_new(fd);
 
-  colreader_scan(cr);
+  //colreader_scan(cr);
+  fprintf(stderr, "blocksz: %zd, block: %p, linesz: %zd, linebuf: %p\n",
+      cr->blocksz, cr->block, cr->linesz, cr->linebuf);
+  asm_scan(cr);
 
   colreader_free(cr);
   close(fd);

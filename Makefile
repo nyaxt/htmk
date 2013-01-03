@@ -1,9 +1,19 @@
-CFLAGS+= -std=c99
+LDFLAGS+= -g
+CFLAGS+= -std=c99 -g
 
 check: htmk
 	./htmk
 
-htmk: htmk.c
-	gcc $(CFLAGS) -o $@ $<
+htmk: htmk.o scantest.o
+	gcc $(LDFLAGS) -o $@ $^
 
-.PHONY: check
+htmk.o: htmk.c
+	gcc $(CFLAGS) -c $<
+
+scantest.o: scantest.nasm
+	nasm -g -f elf64 -F dwarf $<
+
+clean:
+	rm *.o
+
+.PHONY: check clean
