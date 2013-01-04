@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <dlfcn.h>
+
 #if 0
 struct htmk;
 struct htmk* htmk_new(void);
@@ -125,7 +127,7 @@ colreader_gets(struct colreader_t* cr)
   return 1;
 }
 
-extern void asm_scan(struct colreader_t* cr);
+void (*asm_scan)(struct colreader_t* cr);
 
 void
 colreader_scan(struct colreader_t* cr)
@@ -138,6 +140,12 @@ colreader_scan(struct colreader_t* cr)
 
 int main()
 {
+  void* h = dlopen("./scantest.so", RTLD_NOW);
+  if(!h) printf("dlopen err: %s\n", dlerror());
+
+  asm_scan = dlsym(h, "asm_scan");
+  if(!asm_scan) printf("dlsym err: %s\n", dlerror());
+
   int fd = open("fluent/al/agent.hclm", O_RDONLY);
   if(fd < 0) { perror("open"); return 1; }
 
@@ -161,5 +169,6 @@ int main()
   colreader_free(cr);
   close(fd);
 
+  dlclose(h);
   return 0;
 }

@@ -1,6 +1,7 @@
 SECTION .text
 
-global asm_scan
+global asm_scan:function
+extern  _GLOBAL_OFFSET_TABLE_
 extern memcpy
 
 %define cr [rbp-8*6]
@@ -30,15 +31,18 @@ extern memcpy
   mov rbp, rsp
   sub rsp, 8*8
 
+  call .get_GOT
+.get_GOT:
+  pop rbx
+  add rbx, _GLOBAL_OFFSET_TABLE_+$$-.get_GOT wrt ..gotpc
+
   ; save callee-saved regs
   mov [rbp-8*5], r15
   mov [rbp-8*4], r14
   mov [rbp-8*3], r13
   mov [rbp-8*2], r12
-  mov [rbp-8*1], rbx
 
   ; rcx : rowid
-
   xor rcx, rcx ; rcx = 0
 
   ; struct colreader_t
@@ -56,7 +60,6 @@ extern memcpy
   mov [rsi+8*6], rdi ; store emitbuf sz
   
   ; restore callee-saved regs
-  mov rbx, [rbp-8*1]
   mov r12, [rbp-8*2]
   mov r13, [rbp-8*3]
   mov r14, [rbp-8*4]
@@ -87,7 +90,7 @@ extern memcpy
   test rdx, rdx
   jz .loopstart
 
-  lea rbx, [rsi+2]
+  lea r12, [rsi+2]
   lea rsi, [rsi+rdx+2]
 %endmacro
 
@@ -95,9 +98,9 @@ extern memcpy
   mov [rdi], dx
 
   my_pushal
-  mov rsi, rbx
+  mov rsi, r12
   lea rdi, [rdi+2]
-  call memcpy 
+  call memcpy wrt ..plt
   my_popal
 
   lea rdi, [rdi+rdx+2]
