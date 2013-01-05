@@ -68,19 +68,7 @@ class ColumnsReader
 
 end
 
-# size_t krn(char* emitbuf, const char* block, size_t blocksz)
-class Kernel
-
-  def initialize(opts = {})
-    @opts = opts.clone
-    @opts[:scan] ||= :all
-    @emits = opts[:emits] || [:val]
-  end
-
-  def self.gen_name
-    # "htmknl_"+SecureRandom.random_number(2**20).to_s(32)
-    "htmknl"
-  end
+class CodeGen
 
   NCALLEE_SAVED_REGS = 5
 
@@ -122,6 +110,92 @@ class Kernel
     pop rax
   END
 
+  ORIG_EMITBUF = "[rbp - 8*#{NCALLEE_SAVED_REGS+1}]"
+
+  NLOCAL = NCALLEE_SAVED_REGS + 1
+
+  def self.gen_code(opts)
+    self.new(opts).gen_code
+  end
+
+  def initialize(opts = {})
+    @funcname = opts[:funcname] or raise 'funcname not given'
+    @emits = opts[:emits] or raise 'emits not given'
+  end
+
+  def gen_code
+    header = gen_header
+    begin_loop, end_loop = gen_scanloop
+    read = gen_read
+    filter = gen_filter
+    emit = gen_emit
+    prologue, epilogue = gen_proepi
+
+    code =
+      header+ 
+      prologue+
+      begin_loop+
+        read+
+        filter+
+        emit+
+      end_loop+
+      epilogue
+
+    code.gsub(/^\s*/, '')
+  end
+
+private
+  def gen_header
+    extdecl = %w(_GLOBAL_OFFSET_TABLE_ memcpy).map {|e| "extern #{e}"}.join("\n")
+
+    <<-END
+      SECTION .text
+      #{extdecl}
+
+      global #{@funcname}:function
+
+      #{@funcname}:
+    END
+  end
+
+  def gen_scanloop
+    begin_loop = <<-END
+      ; begin loop
+      jmp .loopentry
+    .loopstart:
+    END
+
+    end_loop = <<-END
+    .loopcontinue:
+      inc rcx
+    .loopentry:
+      cmp rsi, r8
+      jl .loopstart
+    END
+
+    [begin_loop, end_loop]
+  end
+
+  def gen_read
+    <<-END
+      movzx rdx, word [rsi]
+      add rsi, 2
+      test rdx, rdx
+      jz .loopstart
+
+      mov r12, rsi
+      add rsi, rdx
+    END
+  end
+
+  def gen_filter
+    <<-END
+      ; only output rows w/ even rowids
+      test rcx, 0x1
+      jnz .loopcontinue
+    END
+  end
+
   EMITTERS = {}
 
   EMITTERS[:val] = <<-END
@@ -141,58 +215,15 @@ class Kernel
     add rdi, 8
   END
 
-  def gen_code
-    @funcname ||= self.class.gen_name
+  def gen_emit
+    @emits.map {|e| EMITTERS[e]}.join("\n")
+  end
 
-    extdecl = %w(_GLOBAL_OFFSET_TABLE_ memcpy).map {|e| "extern #{e}"}.join("\n")
-    header = <<-END
-      SECTION .text
-      #{extdecl}
-
-      global #{@funcname}:function
-
-      #{@funcname}:
-    END
-
-    nlocal = NCALLEE_SAVED_REGS + 1
-    orig_emitbuf = "[rbp - 8*#{NCALLEE_SAVED_REGS+1}]"
-
-    begin_loop = <<-END
-      ; begin loop
-      jmp .loopentry
-    .loopstart:
-    END
-
-    end_loop = <<-END
-    .loopcontinue:
-      inc rcx
-    .loopentry:
-      cmp rsi, r8
-      jl .loopstart
-    END
-
-    read = <<-END
-      movzx rdx, word [rsi]
-      add rsi, 2
-      test rdx, rdx
-      jz .loopstart
-
-      mov r12, rsi
-      add rsi, rdx
-    END
-
-    filter = <<-END
-      ; only output rows w/ even rowids
-      test rcx, 0x1
-      jnz .loopcontinue
-    END
-
-    emit = @emits.map {|e| EMITTERS[e]}.join("\n")
-
+  def gen_proepi
     prologue = <<-END
       push rbp
       mov rbp, rsp
-      sub rsp, 8*#{nlocal}
+      sub rsp, 8*#{NLOCAL}
 
       #{SAVE_CALLEE_SAVED_REGS}
 
@@ -201,7 +232,7 @@ class Kernel
       
       ; get args
       ; mov rdi, rdi ; rdi : emitbuf
-      mov #{orig_emitbuf}, rdi
+      mov #{ORIG_EMITBUF}, rdi
       ; mov rsi, rsi ; rsi : block
       mov r8, rsi
       add r8, rdx ; r8: block sentinel. rdx = 3nd arg = blocksz
@@ -209,31 +240,39 @@ class Kernel
 
     epilogue = <<-END
       mov rax, rdi
-      sub rax, #{orig_emitbuf} ; calc emitbuf sz: rdi -= emitbuf start 
+      sub rax, #{ORIG_EMITBUF} ; calc emitbuf sz: rdi -= emitbuf start 
 
       #{RESTORE_CALLEE_SAVED_REGS}
       leave
       ret
     END
 
-    code =
-      header+ 
-      prologue+
-      begin_loop+
-        read+
-        filter+
-        emit+
-      end_loop+
-      epilogue
+    [prologue, epilogue]
+  end
 
-    code.gsub(/^\s*/, '')
+end
+
+# size_t krn(char* emitbuf, const char* block, size_t blocksz)
+class Kernel
+
+  def initialize(opts = {})
+    @opts = opts.clone
+    @opts[:scan] ||= :all
+    @emits = opts[:emits] || [:val]
+  end
+
+  def self.gen_name
+    # "htmknl_"+SecureRandom.random_number(2**20).to_s(32)
+    "htmknl"
   end
 
   def compile
     return @compiled if @compiled
 
-    @code = gen_code
-    puts @code
+    @funcname ||= self.class.gen_name
+    @code = CodeGen.gen_code(funcname: @funcname, emits: @emits)
+    # puts @code
+
     File.open('knl.nasm', 'w') {|f| f.write @code }
     system "nasm -g -f elf64 -F dwarf knl.nasm && ld -shared -o knl.so knl.o" or raise "compile failure"
     
