@@ -6,37 +6,64 @@ require 'securerandom'
 
 module Htmk
 
-class ColumnsReader
-
-  def initialize(io)
-    @io = io
-  end
-
-  def next_tuples
-
-  end
-
-end
-
 class Tuples
 
   include Enumerable
 
+  attr_reader :bytes
+  attr_reader :format
+
   def initialize(opts = {})
     @bytes = opts[:bytes] || ""
-    # @format = opts[:format] || [:value]
+    @format = opts[:format] || [:val]
   end
 
   def each(&b)
     i = 0
     while i < @bytes.size do
-      strsz = @bytes[i, 2].unpack("S")[0]
-      i += 2
-      str = @bytes[i, strsz].force_encoding("UTF-8")
-      i += strsz
+      t = []
 
-      yield str
+      @format.each do |f|
+        case f
+        when :rowid
+          t << @bytes[i, 8].unpack("Q")[0]
+          i += 8
+
+        when :val
+          strsz = @bytes[i, 2].unpack("S")[0]
+          i += 2
+          str = @bytes[i, strsz].force_encoding("UTF-8")
+          i += strsz
+
+          t << str
+
+        else
+          raise "unknown tuple elem '#{f}' in format"
+        end
+      end
+
+      yield t
     end
+  end
+
+end
+
+class ColumnsReader
+
+  include Enumerable
+
+  def self.fromFile(path)
+    io = File.open(path, 'r')
+    self.new(io)
+  end
+
+  def initialize(io)
+    @io = io
+    @format = [:val]
+  end
+
+  def each
+    yield Tuples.new(bytes: @io.read, format: @format)
   end
 
 end
@@ -47,7 +74,7 @@ class Kernel
   def initialize(opts = {})
     @opts = opts.clone
     @opts[:scan] ||= :all
-    @opts[:emit] ||= [:value]
+    @emits = opts[:emits] || [:val]
   end
 
   def self.gen_name
@@ -95,6 +122,25 @@ class Kernel
     pop rax
   END
 
+  EMITTERS = {}
+
+  EMITTERS[:val] = <<-END
+    mov [rdi], dx
+
+    #{MY_PUSHAL} 
+    mov rsi, r12
+    lea rdi, [rdi+2]
+    call memcpy wrt ..plt
+    #{MY_POPAL}
+    
+    lea rdi, [rdi+rdx+2]
+  END
+
+  EMITTERS[:rowid] = <<-END
+    mov [rdi], rcx
+    add rdi, 8
+  END
+
   def gen_code
     @funcname ||= self.class.gen_name
 
@@ -136,17 +182,7 @@ class Kernel
 
     filter = ''
 
-    emit = <<-END
-      mov [rdi], dx
-
-      #{MY_PUSHAL} 
-      mov rsi, r12
-      lea rdi, [rdi+2]
-      call memcpy wrt ..plt
-      #{MY_POPAL}
-      
-      lea rdi, [rdi+rdx+2]
-    END
+    emit = @emits.map {|e| EMITTERS[e]}.join("\n")
 
     prologue = <<-END
       push rbp
@@ -221,31 +257,28 @@ class Kernel
     end
   end
 
-  def run(colblk_s)
+  def run(ts)
     load_lib
+
+    colblk_s = ts.bytes
 
     emitbuf = FFI::MemoryPointer.new(:char, 32*1024)
     colblk = FFI::MemoryPointer.new(:char, colblk_s.size)
     colblk.put_bytes(0, colblk_s)
     emitsz = @lib.__send__(@funcname.to_sym, emitbuf, colblk, colblk_s.size)
     puts "emitsz: #{emitsz}"
-    Tuples.new(bytes: emitbuf.get_bytes(0, emitsz))
+    Tuples.new(bytes: emitbuf.get_bytes(0, emitsz), format: @emits)
   end
 
 end
 
 end # module Htmk
 
-krn = Htmk::Kernel.new
+require 'pp'
+krn = Htmk::Kernel.new(emits: [:val, :rowid])
+cols = Htmk::ColumnsReader.fromFile("fluent/al/agent.hclm")
 
-colblk = File.read("fluent/al/agent.hclm")
-p colblk
-p :beforerun
-t = krn.run(colblk)
-p t.to_a
-p :afterrun
-
-# cols = Htmk::ColumnsReader.new("fluent/al/agent.hclm")
-# t = cols.next_tuples
-# krn.run(cols.next_block)
-
+cols.each do |ts|
+  t = krn.run(ts)
+  pp t.to_a
+end
