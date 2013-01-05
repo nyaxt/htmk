@@ -191,11 +191,11 @@ class Kernel
 
       #{SAVE_CALLEE_SAVED_REGS}
 
-      ; rbx : got
-      call .get_GOT
-    .get_GOT:
-      pop rbx
-      add rbx, _GLOBAL_OFFSET_TABLE_+$$-.get_GOT wrt ..gotpc
+    ; rbx : got
+    ;  call .get_GOT
+    ;.get_GOT:
+    ;  pop rbx
+    ;  add rbx, _GLOBAL_OFFSET_TABLE_+$$-.get_GOT wrt ..gotpc
 
       ; rcx : rowid
       xor rcx, rcx ; rcx = 0
@@ -243,9 +243,7 @@ class Kernel
   def load_lib
     return @lib if @lib
 
-    compile
-
-    lib = @compiled
+    lib = compile
     fn = @funcname
 
     @lib = Module.new 
@@ -255,6 +253,8 @@ class Kernel
 
       attach_function fn, [:pointer, :pointer, :ulong], :ulong
     end
+
+    @lib
   end
 
   def run(ts)
