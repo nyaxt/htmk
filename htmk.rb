@@ -91,7 +91,6 @@ class CodeGen
   END
 
   MY_PUSHAL =<<-END
-    push rax
     push rcx
     push rdx
     push rsi
@@ -107,7 +106,6 @@ class CodeGen
     pop rsi
     pop rdx
     pop rcx
-    pop rax
   END
 
   ORIG_EMITBUF = "[rbp - 8*#{NCALLEE_SAVED_REGS+1}]"
@@ -146,8 +144,12 @@ class CodeGen
   end
 
 private
+  def gen_call(func)
+    "call #{func} wrt ..plt"
+  end
+
   def gen_header
-    extdecl = %w(_GLOBAL_OFFSET_TABLE_ memcpy).map {|e| "extern #{e}"}.join("\n")
+    extdecl = %w(_GLOBAL_OFFSET_TABLE_ memcmp memcpy).map {|e| "extern #{e}"}.join("\n")
 
     <<-END
       SECTION .text
@@ -179,12 +181,12 @@ private
 
   def gen_read
     <<-END
-      movzx rdx, word [rsi]
+      movzx rdx, word [rsi] ; rdx: val len
       add rsi, 2
       test rdx, rdx
       jz .loopstart
 
-      mov r12, rsi
+      mov r12, rsi ; r12: val str
       add rsi, rdx
     END
   end
@@ -198,6 +200,18 @@ private
           test rcx, 0x1
           jnz .loopcontinue
         END
+      when :equal
+        <<-END
+          ; only output rows w/ value exactly match given str
+          #{MY_PUSHAL}
+          mov rsi, r12 ; val len
+          mov rdi, r9  ; specified str
+          mov rdx, 3 ; cmpstrlen
+          #{gen_call 'memcmp'}
+          #{MY_POPAL}
+          test rax, rax
+          jnz .loopcontinue
+        END
       end
     end.join("\n")
   end
@@ -205,24 +219,35 @@ private
   EMITTERS = {}
 
   EMITTERS[:val] = <<-END
-    mov [rdi], dx
-
-    #{MY_PUSHAL} 
-    mov rsi, r12
-    lea rdi, [rdi+2]
-    call memcpy wrt ..plt
-    #{MY_POPAL}
-    
-    lea rdi, [rdi+rdx+2]
   END
 
-  EMITTERS[:rowid] = <<-END
-    mov [rdi], rcx
-    add rdi, 8
-  END
-
+  EMITTERS[:rowid] = 
   def gen_emit
-    @emits.map {|e| EMITTERS[e]}.join("\n")
+    @emits.map do |e|
+      case e
+      when :val
+        <<-END
+          mov [rdi], dx
+
+          #{MY_PUSHAL} 
+          mov rsi, r12
+          lea rdi, [rdi+2]
+          #{gen_call 'memcpy'}
+          #{MY_POPAL}
+          
+          lea rdi, [rdi+rdx+2]
+        END
+
+      when :rowid
+        <<-END
+          mov [rdi], rcx
+          add rdi, 8
+        END
+
+      else
+        raise "unknown emitter '#{e}'"
+      end
+    end.join("\n")
   end
 
   def gen_proepi
@@ -233,15 +258,16 @@ private
 
       #{SAVE_CALLEE_SAVED_REGS}
 
-      ; rcx : rowid
-      xor rcx, rcx ; rcx = 0
-      
       ; get args
       ; mov rdi, rdi ; rdi : emitbuf
       mov #{ORIG_EMITBUF}, rdi
       ; mov rsi, rsi ; rsi : block
       mov r8, rsi
-      add r8, rdx ; r8: block sentinel. rdx = 3nd arg = blocksz
+      add r8, rdx    ; r8: block sentinel. rdx = 3nd arg = blocksz
+      mov r9, rcx    ; r9: other params
+
+      ; rcx : rowid
+      xor rcx, rcx ; rcx = 0
     END
 
     epilogue = <<-END
@@ -278,7 +304,7 @@ class Kernel
 
     @funcname ||= self.class.gen_name
     @code = CodeGen.gen_code(funcname: @funcname, emits: @emits, filters: @filters)
-    # puts @code
+    puts @code
 
     File.open('knl.nasm', 'w') {|f| f.write @code }
     system "nasm -g -f elf64 -F dwarf knl.nasm && ld -shared -o knl.so knl.o" or raise "compile failure"
@@ -297,11 +323,13 @@ class Kernel
       extend FFI::Library
       ffi_lib lib 
 
-      attach_function fn, [:pointer, :pointer, :ulong], :ulong
+      attach_function fn, [:pointer, :pointer, :ulong, :pointer], :ulong
     end
 
     @lib
   end
+
+  MATCH_STR="172.22.1.2\0"
 
   def run(ts)
     load_lib
@@ -311,7 +339,9 @@ class Kernel
     emitbuf = FFI::MemoryPointer.new(:char, 32*1024)
     colblk = FFI::MemoryPointer.new(:char, colblk_s.size)
     colblk.put_bytes(0, colblk_s)
-    emitsz = @lib.__send__(@funcname.to_sym, emitbuf, colblk, colblk_s.size)
+    asdf = FFI::MemoryPointer.new(:char, 1024)
+    asdf.put_bytes(0, MATCH_STR)
+    emitsz = @lib.__send__(@funcname.to_sym, emitbuf, colblk, colblk_s.size, asdf)
     puts "emitsz: #{emitsz}"
     Tuples.new(bytes: emitbuf.get_bytes(0, emitsz), format: @emits)
   end
@@ -321,8 +351,8 @@ end
 end # module Htmk
 
 require 'pp'
-krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:even])
-cols = Htmk::ColumnsReader.fromFile("fluent/al/agent.hclm")
+krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:equal])
+cols = Htmk::ColumnsReader.fromFile("fluent/al/host.hclm")
 
 cols.each do |ts|
   t = krn.run(ts)
