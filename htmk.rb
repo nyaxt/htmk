@@ -121,6 +121,7 @@ class CodeGen
   def initialize(opts = {})
     @funcname = opts[:funcname] or raise 'funcname not given'
     @emits = opts[:emits] or raise 'emits not given'
+    @filters = opts[:filters] or raise 'filters not given'
   end
 
   def gen_code
@@ -189,11 +190,16 @@ private
   end
 
   def gen_filter
-    <<-END
-      ; only output rows w/ even rowids
-      test rcx, 0x1
-      jnz .loopcontinue
-    END
+    @filters.map do |f|
+      case f
+      when :even
+        <<-END
+          ; only output rows w/ even rowids
+          test rcx, 0x1
+          jnz .loopcontinue
+        END
+      end
+    end.join("\n")
   end
 
   EMITTERS = {}
@@ -259,6 +265,7 @@ class Kernel
     @opts = opts.clone
     @opts[:scan] ||= :all
     @emits = opts[:emits] || [:val]
+    @filters = opts[:filters] || []
   end
 
   def self.gen_name
@@ -270,7 +277,7 @@ class Kernel
     return @compiled if @compiled
 
     @funcname ||= self.class.gen_name
-    @code = CodeGen.gen_code(funcname: @funcname, emits: @emits)
+    @code = CodeGen.gen_code(funcname: @funcname, emits: @emits, filters: @filters)
     # puts @code
 
     File.open('knl.nasm', 'w') {|f| f.write @code }
@@ -314,7 +321,7 @@ end
 end # module Htmk
 
 require 'pp'
-krn = Htmk::Kernel.new(emits: [:val, :rowid])
+krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:even])
 cols = Htmk::ColumnsReader.fromFile("fluent/al/agent.hclm")
 
 cols.each do |ts|
