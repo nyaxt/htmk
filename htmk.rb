@@ -160,12 +160,13 @@ class Kernel
     begin_loop = <<-END
       ; begin loop
       jmp .loopentry
-      .loopstart:
+    .loopstart:
     END
 
     end_loop = <<-END
+    .loopcontinue:
       inc rcx
-      .loopentry:
+    .loopentry:
       cmp rsi, r8
       jl .loopstart
     END
@@ -180,7 +181,11 @@ class Kernel
       add rsi, rdx
     END
 
-    filter = ''
+    filter = <<-END
+      ; only output rows w/ even rowids
+      test rcx, 0x1
+      jnz .loopcontinue
+    END
 
     emit = @emits.map {|e| EMITTERS[e]}.join("\n")
 
@@ -190,12 +195,6 @@ class Kernel
       sub rsp, 8*#{nlocal}
 
       #{SAVE_CALLEE_SAVED_REGS}
-
-    ; rbx : got
-    ;  call .get_GOT
-    ;.get_GOT:
-    ;  pop rbx
-    ;  add rbx, _GLOBAL_OFFSET_TABLE_+$$-.get_GOT wrt ..gotpc
 
       ; rcx : rowid
       xor rcx, rcx ; rcx = 0
@@ -222,7 +221,7 @@ class Kernel
       prologue+
       begin_loop+
         read+
-        # filter+
+        filter+
         emit+
       end_loop+
       epilogue
@@ -234,6 +233,7 @@ class Kernel
     return @compiled if @compiled
 
     @code = gen_code
+    puts @code
     File.open('knl.nasm', 'w') {|f| f.write @code }
     system "nasm -g -f elf64 -F dwarf knl.nasm && ld -shared -o knl.so knl.o" or raise "compile failure"
     
