@@ -20,6 +20,25 @@ end
 
 class Tuples
 
+  include Enumerable
+
+  def initialize(opts = {})
+    @bytes = opts[:bytes] || ""
+    # @format = opts[:format] || [:value]
+  end
+
+  def each(&b)
+    i = 0
+    while i < @bytes.size do
+      strsz = @bytes[i, 2].unpack("S")[0]
+      i += 2
+      str = @bytes[i, strsz].force_encoding("UTF-8")
+      i += strsz
+
+      yield str
+    end
+  end
+
 end
 
 # size_t krn(char* emitbuf, const char* block, size_t blocksz)
@@ -210,7 +229,7 @@ class Kernel
     colblk.put_bytes(0, colblk_s)
     emitsz = @lib.__send__(@funcname.to_sym, emitbuf, colblk, colblk_s.size)
     puts "emitsz: #{emitsz}"
-    emitbuf.get_bytes(0, emitsz)
+    Tuples.new(bytes: emitbuf.get_bytes(0, emitsz))
   end
 
 end
@@ -222,8 +241,10 @@ krn = Htmk::Kernel.new
 colblk = File.read("fluent/al/agent.hclm")
 p colblk
 p :beforerun
-p krn.run(colblk)
+t = krn.run(colblk)
+p t.to_a
 p :afterrun
+
 # cols = Htmk::ColumnsReader.new("fluent/al/agent.hclm")
 # t = cols.next_tuples
 # krn.run(cols.next_block)
