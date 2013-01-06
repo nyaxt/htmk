@@ -3,4 +3,8 @@ fluent/al
 fluent/gems
 fluent/.bundle
 *.o
+*.so
 htmk
+.bundle
+gems
+knl.nasm
