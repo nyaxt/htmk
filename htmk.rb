@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'bundler/setup'
-require 'ffi'
+require './ext/htmk'
 require 'securerandom'
 
 module Htmk
@@ -284,6 +284,20 @@ private
 
 end
 
+class KrnDL
+
+  attr_reader :sopath
+  attr_reader :funcname
+  
+  def initialize(sopath, funcname)
+    @sopath = sopath.to_s.clone.freeze
+    @funcname = funcname.to_s.clone.freeze
+    raise "" unless File.exist?(@sopath)
+    load_intern(@sopath, @funcname)
+  end
+
+end
+
 # size_t krn(char* emitbuf, const char* block, size_t blocksz)
 class Kernel
 
@@ -313,37 +327,18 @@ class Kernel
   end
 
   def load_lib
-    return @lib if @lib
+    return @dl if @dl
 
     lib = compile
-    fn = @funcname
 
-    @lib = Module.new 
-    @lib.module_eval do
-      extend FFI::Library
-      ffi_lib lib 
-
-      attach_function fn, [:pointer, :pointer, :ulong, :pointer], :ulong
-    end
-
-    @lib
+    @dl = KrnDL.new(lib, @funcname)
   end
 
   MATCH_STR="172.22.1.2\0"
 
   def run(ts)
-    load_lib
-
-    colblk_s = ts.bytes
-
-    emitbuf = FFI::MemoryPointer.new(:char, 32*1024)
-    colblk = FFI::MemoryPointer.new(:char, colblk_s.size)
-    colblk.put_bytes(0, colblk_s)
-    asdf = FFI::MemoryPointer.new(:char, 1024)
-    asdf.put_bytes(0, MATCH_STR)
-    emitsz = @lib.__send__(@funcname.to_sym, emitbuf, colblk, colblk_s.size, asdf)
-    puts "emitsz: #{emitsz}"
-    Tuples.new(bytes: emitbuf.get_bytes(0, emitsz), format: @emits)
+    emitbuf = load_lib.yield(ts.bytes, "172")
+    Tuples.new(bytes: emitbuf, format: @emits)
   end
 
 end
@@ -355,6 +350,7 @@ krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:equal])
 cols = Htmk::ColumnsReader.fromFile("fluent/al/host.hclm")
 
 cols.each do |ts|
+  pp ts.to_a
   t = krn.run(ts)
   pp t.to_a
 end

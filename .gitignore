@@ -8,3 +8,4 @@ htmk
 .bundle
 gems
 knl.nasm
+ext/Makefile
