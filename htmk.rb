@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'bundler/setup'
-require './ext/htmk'
+require_relative 'ext/htmk'
 require 'securerandom'
 
 module Htmk
@@ -46,6 +46,22 @@ class Tuples
     end
   end
 
+  def <<(vals)
+    vals = [vals] unless vals.is_a?(Array)
+    raise "tuple dim do not match" if vals.size != @format.size
+
+    @format.each_with_index do |f, i|
+      v = vals[i]
+      case f
+      when :rowid
+        @bytes << [v].pack("Q")
+      when :val
+        @bytes << [v.size].pack("S")
+        @bytes << v
+      end
+    end
+  end
+
 end
 
 class ColumnsReader
@@ -64,6 +80,29 @@ class ColumnsReader
 
   def each
     yield Tuples.new(bytes: @io.read, format: @format)
+  end
+
+end
+
+class HtmkWriter
+
+  def initialize(cols)
+    @columns = cols.clone
+    @tuples = @columns.map { Tuples.new }
+  end
+
+  def <<(row)
+    @tuples.each_with_index do |ts, i|
+      ts << row[i]
+    end
+  end
+
+  def close
+    @columns.each_with_index do |c, i|
+      File.open("#{c}.htmk", 'w') do |f|
+        f.write @tuples[i].bytes
+      end
+    end
   end
 
 end
@@ -346,11 +385,21 @@ end
 end # module Htmk
 
 require 'pp'
-krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:equal])
-cols = Htmk::ColumnsReader.fromFile("fluent/al/host.hclm")
 
-cols.each do |ts|
-  pp ts.to_a
-  t = krn.run(ts)
-  pp t.to_a
+if __FILE__ == $0
+  t = Htmk::Tuples.new(format: [:rowid, :val])
+  t << [1, "apple"]
+  t << [2, "banana"]
+  t << [3, "carrot"]
+  p t.to_a
+
+  exit
+  krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:equal])
+  cols = Htmk::ColumnsReader.fromFile("fluent/al/host.hclm")
+
+  cols.each do |ts|
+    pp ts.to_a
+    t = krn.run(ts)
+    pp t.to_a
+  end
 end
