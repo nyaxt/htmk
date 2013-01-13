@@ -97,7 +97,7 @@ KrnDL_yield(VALUE self, VALUE v_colblk, VALUE v_filterargs)
   Check_Type(v_colblk, T_STRING);
   Check_Type(v_filterargs, T_STRING);
 
-  VALUE v_emit = rb_str_buf_new(32 * 1024);
+  VALUE v_emit = rb_str_buf_new(64 * 1024);
   size_t emitsz = (*k->fp)(RSTRING_PTR(v_emit), RSTRING_PTR(v_colblk), RSTRING_LEN(v_colblk), RSTRING_PTR(v_filterargs));
   rb_str_set_len(v_emit, emitsz);
 
