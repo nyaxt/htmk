@@ -1,6 +1,5 @@
 #!/usr/bin/env ruby
 
-require 'bundler/setup'
 require_relative 'ext/htmk'
 require 'securerandom'
 
@@ -15,6 +14,7 @@ class Tuples
 
   def initialize(opts = {})
     @bytes = opts[:bytes] || ""
+    @bytes = @bytes.force_encoding("ASCII-8BIT")
     @format = opts[:format] || [:val]
   end
 
@@ -56,8 +56,8 @@ class Tuples
       when :rowid
         @bytes << [v].pack("Q")
       when :val
-        @bytes << [v.size].pack("S")
-        @bytes << v
+        @bytes << [v.bytesize].pack("S")
+        @bytes << v.force_encoding("ASCII-8BIT")
       end
     end
   end
@@ -99,7 +99,7 @@ class HtmkWriter
 
   def close
     @columns.each_with_index do |c, i|
-      File.open("#{c}.htmk", 'w') do |f|
+      File.open("#{c}.hclm", 'w') do |f|
         f.write @tuples[i].bytes
       end
     end
@@ -387,15 +387,8 @@ end # module Htmk
 require 'pp'
 
 if __FILE__ == $0
-  t = Htmk::Tuples.new(format: [:rowid, :val])
-  t << [1, "apple"]
-  t << [2, "banana"]
-  t << [3, "carrot"]
-  p t.to_a
-
-  exit
-  krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:equal])
-  cols = Htmk::ColumnsReader.fromFile("fluent/al/host.hclm")
+  krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [])
+  cols = Htmk::ColumnsReader.fromFile("bookdb/title.hclm")
 
   cols.each do |ts|
     pp ts.to_a
