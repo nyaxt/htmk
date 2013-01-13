@@ -10,4 +10,4 @@ gems
 knl.nasm
 ext/Makefile
 bookdb/bw.csv
-bookdb/*.htmk
+bookdb/*.hclm
