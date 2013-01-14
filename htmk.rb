@@ -148,6 +148,7 @@ class CodeGen
   END
 
   ORIG_EMITBUF = "[rbp - 8*#{NCALLEE_SAVED_REGS+1}]"
+  NEXT_ROWID = "r13"
 
   NLOCAL = NCALLEE_SAVED_REGS + 1
 
@@ -159,13 +160,16 @@ class CodeGen
     @funcname = opts[:funcname] or raise 'funcname not given'
     @emits = opts[:emits] or raise 'emits not given'
     @filters = opts[:filters] or raise 'filters not given'
+
+    @prologue_hook = ''
+    @loopend_hook = ''
   end
 
   def gen_code
     header = gen_header
-    begin_loop, end_loop = gen_scanloop
     read = gen_read
     filter = gen_filter
+    begin_loop, end_loop = gen_scanloop
     emit = gen_emit
     prologue, epilogue = gen_proepi
 
@@ -208,11 +212,15 @@ private
     END
 
     end_loop = <<-END
+    ; vvv LOOPEND HOOK vvv
+    #{@loopend_hook}
+    ; ^^^ LOOPEND HOOK ^^^
     .loopcontinue:
       inc rcx
     .loopentry:
       cmp rsi, r8
       jl .loopstart
+    .loopexit:
     END
 
     [begin_loop, end_loop]
@@ -239,6 +247,26 @@ private
           test rcx, 0x1
           jnz .loopcontinue
         END
+      when :rowid
+        @prologue_hook << <<-END
+          mov #{NEXT_ROWID}, [r9]
+          add r9, 8
+          cmp #{NEXT_ROWID}, 0
+          jl .loopexit
+        END
+        rowid_filter = <<-END
+          ; only output rows w/ specified rowids
+          cmp rcx, #{NEXT_ROWID}
+          jne .loopcontinue
+        END
+        @loopend_hook << <<-END
+          mov #{NEXT_ROWID}, [r9]
+          add r9, 8
+          cmp #{NEXT_ROWID}, 0
+          jl .loopexit
+        END
+
+        rowid_filter
       when :equal
         <<-END
           ; only output rows w/ value exactly match given str
@@ -307,6 +335,9 @@ private
 
       ; rcx : rowid
       xor rcx, rcx ; rcx = 0
+
+      ; prologue hook
+      #{@prologue_hook}
     END
 
     epilogue = <<-END
@@ -342,7 +373,6 @@ class Kernel
 
   def initialize(opts = {})
     @opts = opts.clone
-    @opts[:scan] ||= :all
     @emits = opts[:emits] || [:val]
     @filters = opts[:filters] || []
   end
@@ -373,10 +403,14 @@ class Kernel
     @dl = KrnDL.new(lib, @funcname)
   end
 
-  MATCH_STR="172.22.1.2\0"
-
   def run(ts)
-    emitbuf = load_lib.yield(ts.bytes, "172")
+    t = Tuples.new(format: [:rowid])
+    t << 35
+    t << 81
+    t << -1 # sentinel
+
+    emitbuf = load_lib.yield(ts.bytes, t.bytes)
+
     Tuples.new(bytes: emitbuf, format: @emits)
   end
 
@@ -387,7 +421,7 @@ end # module Htmk
 require 'pp'
 
 if __FILE__ == $0
-  krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [])
+  krn = Htmk::Kernel.new(emits: [:val, :rowid], filters: [:rowid])
   cols = Htmk::ColumnsReader.fromFile("bookdb/title.hclm")
 
   cols.each do |ts|
